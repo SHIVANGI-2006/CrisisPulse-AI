@@ -1,0 +1,25 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database/*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Node / Neon
+node_modules/
+.neon
+
+# Logs
+*.log
