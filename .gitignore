@@ -17,9 +17,5 @@ venv/
 .venv/
 env/
 
-# Node / Neon
-node_modules/
-.neon
-
 # Logs
 *.log
