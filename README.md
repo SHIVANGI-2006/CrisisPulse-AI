@@ -1,132 +1,107 @@
 # 🆘 CrisisPulse AI — Multi-Agent Crisis Intelligence System
 
-A rebuild of the original Crisis Summarizer, ported off Ollama onto a
-**Groq + Tavily** backend with a redesigned **Gradio** front end.
+CrisisPulse AI is an emergency crisis intelligence and briefing system built with **Python**, **Gradio**, **Groq LLM inference**, **Tavily live web verification**, **SQLAlchemy**, and **ReportLab PDF generation**.
 
-## Architecture
+---
 
+## 🏗️ Architecture
+
+```text
+User Report (text / .txt / .pdf)
+         │
+         ▼
+1. Relevance Agent        (Groq)  — Filters irrelevant text & checks crisis relevance
+         │
+         ▼
+2. Extraction Agent       (Groq)  — Extracts structured facts (type, location, casualties...)
+         │
+         ▼
+3. Live Verification Agent (Tavily + Groq) — Real-time news search & grounded verification
+         │
+         ▼
+4. Severity Agent         (Groq)  — Assigns LOW / MEDIUM / HIGH / CRITICAL with rationale
+         │
+         ▼
+5. Summary & Action Agent (Groq)  — Synthesizes executive briefing & safety actions
+         │
+         ▼
+Persistence (SQLite / Neon Postgres) ──► Gradio Web Interface ──► Downloadable PDF Briefing
 ```
-User report (text / .txt / .pdf)
-        │
-        ▼
-1. Relevance Agent        (Groq)  — is this really a crisis? clean the text
-        │
-        ▼
-2. Extraction Agent       (Groq)  — structured facts (type, location, casualties...)
-        │
-        ▼
-3. Live Verification Agent (Tavily + Groq) — real-time web search + grounded note  ★ NEW
-        │
-        ▼
-4. Severity Agent         (Groq)  — LOW / MEDIUM / HIGH / CRITICAL + reasoning
-        │
-        ▼
-5. Summary & Action Agent (Groq)  — summary, key points, safety actions, alert
-        │
-        ▼
-Stored in DB (SQLite or Neon) → shown in Gradio UI → downloadable PDF briefing
+
+---
+
+## 🛠️ Technology Stack
+
+| Component | Technology | Purpose |
+|---|---|---|
+| **LLM Reasoning** | Groq API (`openai/gpt-oss-120b`, `llama-3.3-70b-versatile`) | Fast, structured multi-agent reasoning |
+| **Live Verification** | Tavily Web Search API | Real-time news grounding and source citation |
+| **User Interface** | Gradio (v4.44+) | Dark glassmorphic command dashboard |
+| **Database** | SQLAlchemy (SQLite / Neon PostgreSQL) | Persistent report history & analytics |
+| **PDF Briefings** | ReportLab | Export formatted PDF crisis briefings |
+| **Document Parsing** | PyPDF / standard I/O | `.txt` and `.pdf` emergency document ingestion |
+
+---
+
+## 🚀 Quick Start (Local Setup)
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/SHIVANGI-2006/CrisisPulse-AI.git
+cd CrisisPulse-AI
 ```
 
-Only two external APIs are used anywhere in this project:
-
-| Service | Role |
-|---|---|
-| **[Groq](https://console.groq.com/keys)** | LLM inference for all 4 reasoning agents (fast + cheap, JSON mode for reliable structured output) |
-| **[Tavily](https://app.tavily.com)** | Live web search that lets the Verification Agent check a report against real current news |
-
-No Ollama, no local model server, no other LLM provider.
-
-## Quick start (Neon-first, since you're deploying this)
-
-**Step 1 — create your Neon database (do this first):**
-1. Go to https://neon.tech and create a free account/project.
-2. In your project, open **Connection Details**.
-3. Turn **Pooled connection** ON (recommended — Gradio can spin up multiple
-   workers) and copy the **Connection string**. It looks like:
-   `postgresql://user:password@ep-xxxx-pooler.region.neon.tech/neondb?sslmode=require`
-
-**Step 2 — configure the app:**
+### 2. Install dependencies
 ```bash
 pip install -r requirements.txt
-cp .env.example .env
-```
-Edit `.env` and paste your connection string into `DATABASE_URL`, plus your
-`GROQ_API_KEY` (and optionally `TAVILY_API_KEY`):
-```bash
-DATABASE_URL=postgresql://user:password@ep-xxxx-pooler.region.neon.tech/neondb?sslmode=require
-GROQ_API_KEY=your_groq_key
-TAVILY_API_KEY=your_tavily_key
 ```
 
-**Step 3 — run it:**
+### 3. Configure environment variables
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Populate `.env` with your API keys:
+```env
+GROQ_API_KEY=gsk_your_groq_api_key_here
+TAVILY_API_KEY=tvly_your_tavily_api_key_here
+DATABASE_URL=postgresql://user:password@ep-xxxx.neon.tech/neondb?sslmode=require
+GROQ_MODEL=openai/gpt-oss-120b
+ENABLE_LIVE_VERIFICATION=true
+DEMO_MODE=false
+```
+
+### 4. Run the application
 ```bash
 python app.py
 ```
-On first run, `services/database_service.py` connects to Neon and
-auto-creates the `crisis_reports` / `analysis_results` tables — no manual
-SQL needed. The app opens at `http://localhost:7860`.
+Open **`http://localhost:7860`** in your browser.
 
-Without a `GROQ_API_KEY` set, the app runs in **Demo Mode**
-(`DEMO_MODE=true` by default) so you can explore the UI with sample output.
-If `DATABASE_URL` is left empty it silently falls back to a local SQLite
-file for convenience, but you'll see a warning in the logs — **fill in
-`DATABASE_URL` before you deploy** so incident history survives restarts.
+---
 
-## Why Neon by default
+## ☁️ Render Deployment Guide
 
-This project is set up to deploy, so Neon (not local SQLite) is the intended
-production database:
-- **Persistence across redeploys** — most hosts (HF Spaces, Render, Railway,
-  Fly.io, etc.) reset the filesystem on redeploy; a local SQLite file would
-  lose all incident history. Neon is a separate, always-on database.
-- **Concurrent access** — if more than one worker/instance serves the app,
-  or more than one person uses it, Postgres handles concurrent writes
-  properly where a single SQLite file does not.
-- **Scales without touching code** — as report volume grows, Neon's
-  managed Postgres scales with it; SQLite does not.
-- **Free to start, zero server ops** — no database server to install,
-  patch, or back up yourself.
+### Deployment Settings on Render:
+- **Environment:** Python 3
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `python app.py`
 
-The local SQLite fallback (`DATABASE_URL` empty) still exists purely for
-quick offline testing on your own machine — it is not meant for deployment.
-Both paths run through the exact same SQLAlchemy code in
-`services/database_service.py`, so there's nothing else to change.
+### Environment Variables on Render:
+| Variable | Value / Description | Sync |
+|---|---|---|
+| `GROQ_API_KEY` | Your Groq API key (`gsk_...`) | Secret (`sync: false`) |
+| `TAVILY_API_KEY` | Your Tavily API key (`tvly-...`) | Secret (`sync: false`) |
+| `DATABASE_URL` | Neon Postgres pooled connection string | Secret (`sync: false`) |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | `openai/gpt-oss-120b` |
+| `ENABLE_LIVE_VERIFICATION` | `true` | `true` |
+| `DEMO_MODE` | `false` | `false` |
 
-## Project structure
+---
 
-```
-CrisisPulse-AI/
-├── app.py                     # Gradio UI (custom CSS/JS, 3 tabs + about)
-├── config.py                  # Env-driven configuration
-├── requirements.txt
-├── .env.example
-├── agents/
-│   ├── relevance_agent.py     # Agent 1 (Groq)
-│   ├── extraction_agent.py    # Agent 2 (Groq)
-│   ├── verification_agent.py  # Agent 3 (Tavily + Groq)  ★ NEW
-│   ├── severity_agent.py      # Agent 4 (Groq)
-│   ├── summary_agent.py       # Agent 5 (Groq)
-│   └── orchestrator.py        # Runs the 5-agent pipeline in order
-├── services/
-│   ├── llm_service.py         # Groq client wrapper
-│   ├── tavily_service.py      # Tavily client wrapper       ★ NEW
-│   ├── database_service.py    # SQLAlchemy: SQLite or Neon
-│   ├── pdf_service.py         # ReportLab PDF export
-│   └── demo_data.py           # Offline demo fallback
-├── utils/
-│   ├── json_parser.py         # Robust JSON extraction from LLM output
-│   └── text_utils.py          # Cleaning / validation / IST timestamps
-└── database/
-    └── schema.sql             # Reference schema (auto-created by the app)
-```
+## 🛡️ Robustness & Fallback Behavior
 
-## Notes on the new Verification Agent
-
-The original project's pipeline stopped at severity + summary using only
-information present in the submitted text. This build adds a **Live
-Verification Agent** between extraction and severity: it searches Tavily for
-recent news matching the extracted crisis type + location, then asks Groq to
-write a short, source-grounded note on whether the report is corroborated,
-along with clickable source links shown in the UI and included in the
-exported PDF. If `TAVILY_API_KEY` isn't set, this step is skipped gracefully
-and the rest of the pipeline still runs normally.
+1. **Groq JSON Validation Recovery:** If Groq raises `json_validate_failed` or `400` error during JSON mode generation, `LLMService` automatically retries without `response_format` constraint and extracts structured data using `utils/json_parser.py`.
+2. **Model Fallback:** If the configured model is unavailable, `LLMService` automatically cycles through candidate models (`openai/gpt-oss-120b` → `llama-3.3-70b-versatile` → `llama-3.1-8b-instant`).
+3. **Database Fallback:** If `DATABASE_URL` is empty or PostgreSQL is unreachable, the database service automatically falls back to local SQLite (`database/crisis.db`).
+4. **Tavily Fallback:** If `TAVILY_API_KEY` is missing or Tavily fails, live verification is marked as unavailable while the rest of the multi-agent pipeline completes normally.
+5. **Demo Mode:** If `GROQ_API_KEY` is not set, the app runs in **Demo Mode**, displaying sample incident analysis without crashing.

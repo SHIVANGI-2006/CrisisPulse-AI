@@ -1,38 +1,29 @@
 """
 agents/verification_agent.py
-AGENT 3 - Live Verification Agent (Tavily + Groq)  ** NEW **
+AGENT 3 - Live Verification Agent (Tavily + Groq)
 
-This is what makes the pipeline genuinely "live": it takes the structured
-facts already extracted, runs a real-time web search via Tavily to see if
-any recent news corroborates the reported event, and asks Groq to write a
-short, grounded verification note plus attach the source links.
-
-If Tavily is not configured, this agent degrades gracefully: the rest of
-the pipeline still runs, it just skips live corroboration.
+Performs a real-time web search via Tavily using extracted crisis type & location.
+Synthesizes a short grounded verification note with source links.
+Gracefully degrades if Tavily API or LLM calls are unavailable.
 """
 
 import logging
-
-from services.tavily_service import TavilyService, TavilyServiceError
-from services.llm_service import LLMService, LLMServiceError
-from utils.json_parser import extract_json
+from services.tavily_service import TavilyService
+from services.llm_service import LLMService
 
 logger = logging.getLogger("crisis_agent.verification_agent")
 
-SYSTEM_PROMPT = """You are the Live Verification Agent inside a multi-agent
-crisis-information analysis system. You are given structured facts already
-extracted from a crisis report, plus live web search results gathered about
-that event. Decide whether the live results corroborate the report and
-write one or two grounded sentences explaining what they do or do not
-confirm. Do not invent facts that are not present in the search results.
+SYSTEM_PROMPT = """You are the Live Verification Agent in a multi-agent crisis intelligence system.
+Analyze extracted emergency report facts and live web search results.
+Decide whether live news corroborates the report and write 1-2 grounded sentences explaining the findings.
 
-Respond ONLY with a JSON object in this exact format, no markdown fences,
-no extra commentary:
-
+Return ONLY a single valid JSON object matching this exact schema:
 {
-  "corroborated": true or false,
-  "verification_note": "one or two sentence note on what the live sources confirm or fail to confirm"
+  "corroborated": true,
+  "verification_note": "one or two sentence summary of live verification findings"
 }
+
+Do not include markdown code fences, commentary, or text outside the JSON object.
 """
 
 
@@ -42,24 +33,26 @@ class VerificationAgent:
         self.tavily = tavily_service or TavilyService()
 
     def run(self, extracted_facts: dict) -> dict:
+        default_output = {
+            "corroborated": "unknown",
+            "verification_note": "Live verification skipped — TAVILY_API_KEY is not configured.",
+            "live_sources": [],
+        }
+
+        if not self.tavily.is_available():
+            return default_output
+
         crisis_type = extracted_facts.get("crisis_type", "crisis")
         location = extracted_facts.get("location", "")
         query = f"{crisis_type} {location} latest news".strip()
 
-        if not self.tavily.is_available():
-            return {
-                "corroborated": "unknown",
-                "verification_note": "Live verification skipped — TAVILY_API_KEY is not configured.",
-                "live_sources": [],
-            }
-
         try:
             search_result = self.tavily.search_crisis(query)
-        except TavilyServiceError as exc:
+        except Exception as exc:
             logger.warning("Tavily search failed: %s", exc)
             return {
                 "corroborated": "unknown",
-                "verification_note": f"Live verification unavailable right now: {exc}",
+                "verification_note": f"Live verification unavailable: {exc}",
                 "live_sources": [],
             }
 
@@ -67,32 +60,41 @@ class VerificationAgent:
         if not sources:
             return {
                 "corroborated": "unknown",
-                "verification_note": "No matching live news sources were found for this event yet.",
+                "verification_note": "No matching live news sources were found for this event.",
                 "live_sources": [],
             }
 
         user_prompt = (
-            f"Structured crisis facts:\n{extracted_facts}\n\n"
+            f"Extracted crisis facts:\n{extracted_facts}\n\n"
             f"Live web search answer:\n{search_result.get('answer', '')}\n\n"
             "Live web search sources:\n"
-            + "\n".join(f"- {s['title']}: {s['content']}" for s in sources)
+            + "\n".join(f"- {s.get('title', 'Source')}: {s.get('content', '')}" for s in sources)
         )
 
         try:
-            raw = self.llm.generate(SYSTEM_PROMPT, user_prompt)
-            parsed = extract_json(raw)
-        except LLMServiceError as exc:
+            parsed = self.llm.generate_json(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                default_dict={"corroborated": "unknown", "verification_note": "Live news sources retrieved."},
+            )
+
+            corroborated_raw = parsed.get("corroborated", "unknown")
+            if isinstance(corroborated_raw, bool):
+                corroborated = "true" if corroborated_raw else "false"
+            else:
+                corroborated = str(corroborated_raw).lower()
+
+            note = str(parsed.get("verification_note", "Live sources located.")).strip()
+
+            return {
+                "corroborated": corroborated,
+                "verification_note": note,
+                "live_sources": sources[:4],
+            }
+        except Exception as exc:
             logger.warning("Verification synthesis failed: %s", exc)
-            parsed = {}
-
-        corroborated = parsed.get("corroborated", "unknown")
-        note = parsed.get(
-            "verification_note",
-            "Live sources were found but could not be automatically summarized.",
-        )
-
-        return {
-            "corroborated": corroborated,
-            "verification_note": note,
-            "live_sources": sources[:4],
-        }
+            return {
+                "corroborated": "unknown",
+                "verification_note": "Live search completed; synthesis summary unavailable.",
+                "live_sources": sources[:4],
+            }

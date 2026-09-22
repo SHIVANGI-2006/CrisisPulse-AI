@@ -2,35 +2,30 @@
 agents/relevance_agent.py
 AGENT 1 - Relevance / Information Filtering Agent (Groq)
 
-Reads the raw text the user submitted and decides whether it is genuinely
-about a real-world crisis/disaster/emergency, strips duplicate/irrelevant
-content, and hands clean text to the rest of the pipeline.
+Decides if raw input is genuinely about a real-world crisis/disaster/emergency,
+strips duplicate/irrelevant content, and returns clean text for the pipeline.
 """
 
 import logging
-from services.llm_service import LLMService, LLMServiceError
-from utils.json_parser import extract_json
+from services.llm_service import LLMService
 
 logger = logging.getLogger("crisis_agent.relevance_agent")
 
-SYSTEM_PROMPT = """You are the Relevance Filtering Agent inside a multi-agent
-crisis-information analysis system. Your ONLY job is to read the raw text
-the user submitted and decide:
-1. Is this text actually about a real-world crisis/disaster/emergency?
-2. Remove any duplicate or repeated sentences.
-3. Remove clearly irrelevant content (greetings, unrelated chit-chat, ads).
+SYSTEM_PROMPT = """You are the Relevance Filtering Agent in a multi-agent crisis intelligence system.
+Your task is to analyze the raw emergency report text and decide:
+1. Is this text about a real-world crisis, disaster, or emergency situation?
+2. Remove duplicate or repeated sentences.
+3. Remove irrelevant conversational chit-chat.
 
-Respond ONLY with a JSON object in this exact format, with no extra text,
-no markdown fences, and no commentary:
-
+Return ONLY a single valid JSON object matching this exact schema:
 {
-  "is_relevant": true or false,
-  "reason": "short reason for your decision",
-  "cleaned_text": "the cleaned, de-duplicated crisis-relevant text"
+  "is_relevant": true,
+  "reason": "short explanation of your decision",
+  "cleaned_text": "cleaned, de-duplicated emergency text"
 }
 
-If the text is not relevant at all, set is_relevant to false and cleaned_text
-to an empty string.
+Do not include markdown code fences, commentary, or text outside the JSON object.
+If the text is not a crisis or emergency, set is_relevant to false and cleaned_text to "".
 """
 
 
@@ -39,26 +34,40 @@ class RelevanceAgent:
         self.llm = llm_service or LLMService()
 
     def run(self, raw_text: str) -> dict:
-        user_prompt = f"Raw report text:\n\n{raw_text}"
+        fallback_data = {
+            "is_relevant": True,
+            "reason": "Relevance check default applied.",
+            "cleaned_text": (raw_text or "").strip(),
+        }
 
-        try:
-            raw_response = self.llm.generate(SYSTEM_PROMPT, user_prompt)
-        except LLMServiceError as exc:
-            logger.error("Relevance Agent LLM call failed: %s", exc)
-            raise
-
-        parsed = extract_json(raw_response)
-
-        if not parsed:
-            logger.warning("Relevance Agent: could not parse JSON, using raw text as-is.")
+        if not raw_text or not raw_text.strip():
             return {
-                "is_relevant": True,
-                "reason": "Could not parse agent output; defaulting to relevant.",
-                "cleaned_text": raw_text.strip(),
+                "is_relevant": False,
+                "reason": "No text provided.",
+                "cleaned_text": "",
             }
 
-        return {
-            "is_relevant": bool(parsed.get("is_relevant", True)),
-            "reason": parsed.get("reason", ""),
-            "cleaned_text": parsed.get("cleaned_text", raw_text.strip()) or raw_text.strip(),
-        }
+        user_prompt = f"Raw emergency report text:\n\n{raw_text.strip()}"
+
+        try:
+            parsed = self.llm.generate_json(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                default_dict=fallback_data,
+            )
+            is_rel = parsed.get("is_relevant")
+            if is_rel is None:
+                is_rel = True
+
+            cleaned = parsed.get("cleaned_text", "")
+            if is_rel and not cleaned.strip():
+                cleaned = raw_text.strip()
+
+            return {
+                "is_relevant": bool(is_rel),
+                "reason": str(parsed.get("reason", "Analysis completed.")),
+                "cleaned_text": str(cleaned).strip(),
+            }
+        except Exception as exc:
+            logger.error("RelevanceAgent encountered error: %s. Using fallback.", exc)
+            return fallback_data
